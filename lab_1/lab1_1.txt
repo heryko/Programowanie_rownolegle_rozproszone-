@@ -1,0 +1,90 @@
+using System;
+using System.Diagnostics;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace KopalniaWegla
+{
+    class Program
+    {
+        // Dane wejściowe
+        const int MinerCount = 5;
+        const int DepositSize = 2000;
+        const int VehicleCapacity = 200;
+        const int MiningTime = 10;
+        const int UnloadingTime = 10;
+        const int TravelTime = 10000;
+        static int remainingCoal = DepositSize;
+        static SemaphoreSlim depositSemaphore = new SemaphoreSlim(2, 2);
+        static SemaphoreSlim warehouseSemaphore = new SemaphoreSlim(1, 1);
+        static object lockObject = new object();
+
+        static void Main(string[] args)
+        {
+            Stopwatch time = Stopwatch.StartNew();
+
+            Task[] miners = new Task[MinerCount];
+            for (int i = 0; i < miners.Length; i++)
+            {
+                int id = i + 1;
+                miners[i] = Task.Run(() => MinerWork(id));
+            }
+            Task.WaitAll(miners);
+
+            time.Stop();
+            Console.WriteLine($"Liczba górników: {MinerCount}, czas przeniesienia węgla: {time.Elapsed.TotalSeconds:F1} s");
+        }
+
+        static void MinerWork(int id)
+        {
+            while (true)
+            {
+                // wydobywanie wegla
+                int loadedCoal = 0;
+                depositSemaphore.Wait();
+                while (loadedCoal < VehicleCapacity)
+                {
+                    bool mined = false;
+                    lock (lockObject)
+                    {
+                        if (remainingCoal > 0)
+                        {
+                            remainingCoal--;
+                            mined = true;
+                        }
+                    }
+                    if (!mined) break;
+
+                    Thread.Sleep(MiningTime);
+                    loadedCoal++;
+                }
+                depositSemaphore.Release();
+
+                if (loadedCoal == 0) {
+                    Console.WriteLine($"Górnik {id} zakończył pracę.");
+                    break;
+                }
+
+                int remaining;
+                lock (lockObject) 
+                { 
+                    remaining = remainingCoal; 
+                }
+                Console.WriteLine($"Górnik {id} wydobył {loadedCoal} jednostek węgla. Pozostało w złożu: {remaining} jednostek.");
+
+                // złoze ------> magazyn
+                Console.WriteLine($"Górnik {id} transportuje węgiel do magazynu...");
+                Thread.Sleep(TravelTime);
+
+                // rozladunek w magazynie
+                warehouseSemaphore.Wait();
+                Console.WriteLine($"Górnik {id} rozładowuje węgiel...");
+                Thread.Sleep(loadedCoal * UnloadingTime);
+                warehouseSemaphore.Release();
+
+                // magazyn -----> złoze
+                Thread.Sleep(TravelTime);
+            }
+        }
+    }
+}
